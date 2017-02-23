@@ -111,3 +111,5 @@
           return queue.enqueueMessage(msg, uptimeMillis);
       }
   ```
+  关于如何**Message入列**请移步[一定搞懂Handler消息处理机制系列之「02.Message入列」](https://github.com/leibown/Study-Notes/blob/master/Android/%E4%B8%80%E5%AE%9A%E6%90%9E%E6%87%82Handler%E6%B6%88%E6%81%AF%E5%A4%84%E7%90%86%E6%9C%BA%E5%88%B6%E7%B3%BB%E5%88%97/%E4%B8%80%E5%AE%9A%E6%90%9E%E6%87%82Handler%E6%B6%88%E6%81%AF%E5%A4%84%E7%90%86%E6%9C%BA%E5%88%B6%E7%B3%BB%E5%88%97%E4%B9%8B%E3%80%8C02.Message%E5%85%A5%E5%88%97%E3%80%8D.md)
+
