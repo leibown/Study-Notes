@@ -1,4 +1,4 @@
-# Message相关
+# Message入列
 
 判断新创建Message处于队列中的位置，并插入相应位置。
 
