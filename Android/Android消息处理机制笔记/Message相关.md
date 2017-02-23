@@ -44,8 +44,8 @@ boolean enqueueMessage(Message msg, long when) {
                     }
                 }
               	/* 此时的p满足以下两个条件中的一个：
-              	 *	1.p为null时，说明prev是当前消息队列中的最后一条消息(因为p为null，所以prev不为					 *	  null且prev的触发时间小于传入Message的触发时间，所以传入Message的为消息队列中的				 *	  最后一条消息，prev为传入Message的上一条消息)
-              	 *	2.p的触发时间大于传入Message的触发时间(因为p的触发时间大于传入Message的触发时					 *	  间，所以p在消息队列中是传入Message的下一条消息，因为在上一次循环中没有进入if语					 *	  句，所以prev不为null且触发时间小于传入Message对象的触发时间，所以prev在消息队列					* 	 中处于传入Message的上一条)
+              	 *	1.p为null时，说明prev是当前消息队列中的最后一条消息(因为p为null，所以prev不为null且prev的触发时间小于传入Message的触发时间，所以传入Message的为消息队列中的最后一条消息，prev为传入Message的上一条消息)
+              	 *	2.p的触发时间大于传入Message的触发时间(因为p的触发时间大于传入Message的触发时间，所以p在消息队列中是传入Message的下一条消息，因为在上一次循环中没有进入if语句，所以prev不为null且触发时间小于传入Message对象的触发时间，所以prev在消息队列中处于传入Message的上一条)
               	 */	
                 msg.next = p;
                 prev.next = msg;
