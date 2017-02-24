@@ -124,5 +124,7 @@ boolean enqueueMessage(Message msg, long when) {
 
 - #### **Message在MessageQueue队列中存在的形式**
 
-  ![message](https://github.com/leibown/Study-Notes/blob/master/img/message.png)
+  ​
+
+  ![message](https://raw.githubusercontent.com/leibown/Study-Notes/master/img/message.png)
 
