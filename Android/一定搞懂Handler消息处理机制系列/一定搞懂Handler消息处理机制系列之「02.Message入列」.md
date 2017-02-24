@@ -1,6 +1,6 @@
 # Message入列
 
-- #### **判断新创建Message处于队列中的位置，并插入相应位置**
+- ## 判断新创建Message处于队列中的位置，并插入相应位置
 
   ```java
   //截取自MessageQueue.enqueueMessage()方法来举例(删除了部分与此次无关代码)
@@ -62,7 +62,7 @@
 
 
 
-- #### **Message的获取方式**
+- ## Message的获取方式
 
   Message的获取方式除了new Message这种方式，Message类还提供了obtain方法来获取Message
 
@@ -125,7 +125,7 @@
 
   可以看出Message在回收过程中，只要消息池的数量小于消息池的最大容量时，就是把当前Message放入消息池中。
 
-- #### **Message在MessageQueue队列中存在的形式**
+- ## Message在MessageQueue队列中存在的形式
 
   从Message入列方式我们也看出，再有新消息进入队列时，是先判断新消息的触发时间，找出消息应该插入消息队列的位置，把这个位置的消息的next置为本条新消息，然后把新消息的next置为这个位置的消息的下一条消息。类似以下结构(如果我理解有错，欢迎指出)。
 
