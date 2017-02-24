@@ -1,6 +1,6 @@
 # Message入列
 
-### 判断新创建Message处于队列中的位置，并插入相应位置
+<font size=5>判断新创建Message处于队列中的位置，并插入相应位置</font>
 
 ```java
 //截取自MessageQueue.enqueueMessage()方法来举例(删除了部分与此次无关代码)
