@@ -1,6 +1,6 @@
-# Message入列
+# MessageQueue与Looper的由来
 
-- #### **判断新创建Message处于队列中的位置，并插入相应位置。**
+判断新创建Message处于队列中的位置，并插入相应位置。
 
 ```java
 //截取自MessageQueue.enqueueMessage()方法来举例(删除了部分与此次无关代码)
@@ -59,69 +59,3 @@ boolean enqueueMessage(Message msg, long when) {
         return true;
     }
 ```
-- #### **Message的获取方式**
-
-  Message的获取方式除了new Message这种方式，Message类还提供了obtain方法来获取Message
-
-  ```java
-  //Message类中有一个静态全局变量来储存空闲或者回收的Message对象
-  private static Message sPool;
-  public static Message obtain() {
-          synchronized (sPoolSync) {
-              if (sPool != null) {
-                  Message m = sPool;
-                  sPool = m.next;
-                  m.next = null;
-                  m.flags = 0; 
-                  sPoolSize--;
-                  return m;
-              }
-          }
-          return new Message();
-      }
-  ```
-
-  这种方式是把静态全局变量*sPool*(这里可以把这个Message看做当前消息池中的第一条消息)标记为未使用然后返回，如果sPool为null才会创建新的Message对象，这样不会造成资源的浪费，避免创建太多Message对象。关于为什么*sPool*会是被回收的Message对象，上源码:
-
-  ```java
-    	//此方法为Message的回收方法
-  	public void recycle() {
-        	//在回收的方法
-          recycleUnchecked();
-      };
-  	void recycleUnchecked() {
-        	//这里在做一些重置的工作
-          flags = FLAG_IN_USE;
-          what = 0;
-          arg1 = 0;
-          arg2 = 0;
-          obj = null;
-          replyTo = null;
-          sendingUid = -1;
-          when = 0;
-          target = null;
-          callback = null;
-          data = null;
-        
-          synchronized (sPoolSync) {
-            //当消息池里消息的数量小于消息池的最大容量时
-              if (sPoolSize < MAX_POOL_SIZE) {
-                	//重点！！！
-                	/*把当前消息池中第一条消息（也就是sPool）置为当前消息的下一条消息(sPool为
-                全局静态变量，所有Message都共用这一个sPool)*/
-                  next = sPool;
-                	/*把当前消息置为消息池中第一条消息(因为上一步骤已经把原来消息池中的第一条消息置为
-                了当前消息的下一条消息，现在把当前消息置为消息池中的第一条消息，所以sPool永远代表
-                消息池中的第一条消息)*/
-                  sPool = this;
-                  sPoolSize++;
-              }
-          }
-      }
-  ```
-
-  可以看出Message在回收过程中，只要消息池的数量小于消息池的最大容量时，就是把当前Message放入消息池中。
-
-- #### **Message在MessageQueue队列中存在的形式**
-
-  ​
