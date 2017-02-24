@@ -15,7 +15,8 @@
           return sendMessageDelayed(getPostMessage(r), delayMillis);
     }
   /**
-  此方法会把产生的Message直接放入消息队列中的首位，官方不建议使用该方法，因为这样操作容易使消息队列匮乏，导致排序问题或具有其他意外的副作用
+  此方法会把产生的Message直接放入消息队列中的首位，官方不建议使用该方法，因为这样操作容易使消息队
+  列匮乏，导致排序问题或具有其他意外的副作用
   */
   public final boolean postAtFrontOfQueue(Runnable r){
           return sendMessageAtFrontOfQueue(getPostMessage(r));
