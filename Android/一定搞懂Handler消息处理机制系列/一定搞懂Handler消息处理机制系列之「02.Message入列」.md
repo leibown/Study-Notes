@@ -124,7 +124,6 @@ boolean enqueueMessage(Message msg, long when) {
 
 - #### **Message在MessageQueue队列中存在的形式**
 
-  ​
+  从Message入列方式我们也看出，再有新消息进入队列时，是先判断新消息的触发时间，找出消息应该插入消息队列的位置，把这个位置的消息的next置为本条新消息，然后把新消息的next置为这个位置的消息的下一条消息。类似以下结构(如果我理解有错，欢迎指出)。
 
   ![message](https://raw.githubusercontent.com/leibown/Study-Notes/master/img/message.png)
-
