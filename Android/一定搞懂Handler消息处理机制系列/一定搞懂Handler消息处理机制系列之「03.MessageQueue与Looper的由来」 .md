@@ -1,61 +1,115 @@
 # MessageQueue与Looper的由来
 
-判断新创建Message处于队列中的位置，并插入相应位置。
+前面两篇文章分别讲了Handler的消息发送和Message入列、Message的创建和Message在队列中的存在形式，那么MessageQueue是怎么来的？因为我们在创建Handler和发送Message时并没有创建MessageQueue，那这个消息队列从何而来呢？上源码:
 
 ```java
-//截取自MessageQueue.enqueueMessage()方法来举例(删除了部分与此次无关代码)
-boolean enqueueMessage(Message msg, long when) {
-        synchronized (this) {
-          	//标记传入的msg被使用
-            msg.markInUse();
-            msg.when = when;
-          	//创建临时变量来储存消息队列中的Message对象
-            Message p = mMessages;
-            boolean needWake;
-          	   /*	
-          		* 当消息队列中没有消息
-          		* 或传入Message的触发时间为0时
-                * 或传入Message的触发时间小于当前消息队列中的Message的触发时间
-                */
-            if (p == null || when == 0 || when < p.when) {
-                //把传入的Message放入当前消息队列中的Message之前
-                msg.next = p;
-              	//把当前消息队列中的Message对象重置为传入的Message对象
-                mMessages = msg;
-                needWake = mBlocked;
-            }  else {
-               /*	
-          		* 当消息队列中有消息
-          		* 且传入Message的触发时间不为0时
-                * 且传入Message的触发时间大于当前消息队列中的Message的触发时间
-                */
-                needWake = mBlocked && p.target == null && msg.isAsynchronous();
-            	//创建一个临时变量
-                Message prev;
-                for (;;) {
-                  	//储存临时变量p(当前消息队列中的Messge)
-                    prev = p;
-                  	//让p指向自己在消息队列中的下一条消息
-                    p = p.next;
-                  	//当p为null时，说明prev是当前消息队列中的最后一条消息
-                  	//或者传入Message的触发时间小于p的触发时间时终止循环
-                    if (p == null || when < p.when) {
-                        break;
-                    }
-                }
-              	/* 此时的p满足以下两个条件中的一个：
-              	 *	1.p为null时，说明prev是当前消息队列中的最后一条消息(因为p为null，所以prev不为
-              	 null且prev的触发时间小于传入Message的触发时间，所以传入Message的为消息队列中的最
-              	 后一条消息，prev为传入Message的上一条消息)
-              	 *	2.p的触发时间大于传入Message的触发时间(因为p的触发时间大于传入Message的触发时
-              	 间，所以p在消息队列中是传入Message的下一条消息，因为在上一次循环中没有进入if语句，
-              	 所以prev不为null且触发时间小于传入Message对象的触发时间，所以prev在消息队列中处于
-              	 传入Message的上一条)
-              	 */	
-                msg.next = p;
-                prev.next = msg;
-            }
+//省略了部分代码
+public Handler(Callback callback, boolean async) {
+        mLooper = Looper.myLooper();
+        if (mLooper == null) {
+            throw new RuntimeException(
+                "Can't create handler inside thread that has not called Looper.prepare()");
         }
-        return true;
+        mQueue = mLooper.mQueue;
+        mCallback = callback;
+        mAsynchronous = async;
+    }
+
+```
+
+以上为Handler的构造方法，Handler的构造方法共有7个，大多数构造方法都指向了这个两个参数的构造方法。从这个构造方法中，我们看到了`mQueue = mLooper.mQueue`说明消息队列MessageQueue为Looper的一个成员变量，mLooper是有Looper类中的静态方法`Looper.myLooper()`获取:
+
+```java
+static final ThreadLocal<Looper> sThreadLocal = new ThreadLocal<Looper>();
+
+public static @Nullable Looper myLooper() {
+        return sThreadLocal.get();
     }
 ```
+
+在`Looper.myLooper()`方法中调用`sThreadLocal.get()`，源码继续：
+
+```java
+public T get() {
+        Thread t = Thread.currentThread();
+        ThreadLocalMap map = getMap(t);
+        if (map != null) {
+            ThreadLocalMap.Entry e = map.getEntry(this);
+            if (e != null)
+                return (T)e.value;
+        }
+        return setInitialValue();
+    }
+```
+
+看到这里其实我是懵逼的(相信大家也都有点懵逼吧)。在这个方法中去获取了当前的线程，看到这里我们至少知道Looper对象是和线程相关的。再来看看这段代码:
+
+```java
+static final ThreadLocal<Looper> sThreadLocal = new ThreadLocal<Looper>();
+private static void prepare(boolean quitAllowed) {
+        if (sThreadLocal.get() != null) {
+            throw new RuntimeException("Only one Looper may be created per thread");
+        }
+        sThreadLocal.set(new Looper(quitAllowed));
+    }
+```
+
+在`Looper.prepare()`方法中我们看到了`sThreadLocal.set(new Looper(quitAllowed));`，结合上面的`sThreadLocal.get()`至少可以看出一个是放入，另一个方法是取出。那为什么我们在没有调用`Looper.prepare()`方法时还能拿到Looper对象呢？准确的说在主线程为什么我们能拿到Looper对象呢。为此查了下资料。以下资料来自[Android中为什么主线程不会因为Looper.loop()里的死循环阻塞？](http://www.jianshu.com/p/72c44d567640)
+
+> 我们知道APP的入口是在ActivityThread,一个Java类,有着main方法,而且main方法中的代码也不是很多.
+
+```java
+public static void main(String[] args) {
+        Trace.traceBegin(Trace.TRACE_TAG_ACTIVITY_MANAGER, "ActivityThreadMain");
+        SamplingProfilerIntegration.start();
+
+        // CloseGuard defaults to true and can be quite spammy.  We
+        // disable it here, but selectively enable it later (via
+        // StrictMode) on debug builds, but using DropBox, not logs.
+        CloseGuard.setEnabled(false);
+
+        Environment.initForCurrentUser();
+
+        // Set the reporter for event logging in libcore
+        EventLogger.setReporter(new EventLoggingReporter());
+
+        AndroidKeyStoreProvider.install();
+
+        // Make sure TrustedCertificateStore looks in the right place for CA certificates
+        final File configDir = Environment.getUserConfigDirectory(UserHandle.myUserId());
+        TrustedCertificateStore.setDefaultUserDirectory(configDir);
+
+        Process.setArgV0("<pre-initialized>");
+
+        Looper.prepareMainLooper();
+
+        ActivityThread thread = new ActivityThread();
+        thread.attach(false);
+
+        if (sMainThreadHandler == null) {
+            sMainThreadHandler = thread.getHandler();
+        }
+
+        if (false) {
+            Looper.myLooper().setMessageLogging(new
+                    LogPrinter(Log.DEBUG, "ActivityThread"));
+        }
+
+        // End of event ActivityThreadMain.
+        Trace.traceEnd(Trace.TRACE_TAG_ACTIVITY_MANAGER);
+        Looper.loop();
+
+        throw new RuntimeException("Main thread loop unexpectedly exited");
+    }
+```
+
+从上述代码中可以看出，APP在启动时就会在主线程中调用Looper.prepareMainLooper()，所以在主线程中一开始就存在着Looper对象，从Looper.prepare()方法中可以看出，一个线程中只能存在一个Looper对象，所以我们在主线程发送消息时并不需要自己创建新的Looper对象，但是在工作线程中使用Handler就必须手动调用`Looper.prepare()`方法。这下我们知道了Looper的来源，MessageQueue的由来也非常明确了。
+
+```java
+private Looper(boolean quitAllowed) {
+        mQueue = new MessageQueue(quitAllowed);
+        mThread = Thread.currentThread();
+    }
+```
+
+在`Looper.prepare()`方法中调用了Looper的构造方法，而就在Looper的构造方法中创建了MessageQueue。
