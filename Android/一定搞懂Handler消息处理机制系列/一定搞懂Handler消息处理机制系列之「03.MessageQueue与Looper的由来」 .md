@@ -20,6 +20,7 @@ public Handler(Callback callback, boolean async) {
 以上为Handler的构造方法，Handler的构造方法共有7个，大多数构造方法都指向了这个两个参数的构造方法。从这个构造方法中，我们看到了`mQueue = mLooper.mQueue`说明消息队列MessageQueue为Looper的一个成员变量，mLooper是有Looper类中的静态方法`Looper.myLooper()`获取:
 
 ```java
+//Looper类
 static final ThreadLocal<Looper> sThreadLocal = new ThreadLocal<Looper>();
 
 public static @Nullable Looper myLooper() {
@@ -30,6 +31,7 @@ public static @Nullable Looper myLooper() {
 在`Looper.myLooper()`方法中调用`sThreadLocal.get()`，源码继续：
 
 ```java
+//ThreadLocal类
 public T get() {
         Thread t = Thread.currentThread();
         ThreadLocalMap map = getMap(t);
@@ -45,6 +47,7 @@ public T get() {
 看到这里其实我是懵逼的(相信大家也都有点懵逼吧)。在这个方法中去获取了当前的线程，看到这里我们至少知道Looper对象是和线程相关的。再来看看这段代码:
 
 ```java
+//Looper类
 static final ThreadLocal<Looper> sThreadLocal = new ThreadLocal<Looper>();
 private static void prepare(boolean quitAllowed) {
         if (sThreadLocal.get() != null) {
@@ -106,6 +109,7 @@ public static void main(String[] args) {
 从上述代码中可以看出，APP在启动时就会在主线程中调用Looper.prepareMainLooper()，所以在主线程中一开始就存在着Looper对象，从Looper.prepare()方法中可以看出，一个线程中只能存在一个Looper对象，所以我们在主线程发送消息时并不需要自己创建新的Looper对象，但是在工作线程中使用Handler就必须手动调用`Looper.prepare()`方法。这下我们知道了Looper的来源，MessageQueue的由来也非常明确了。
 
 ```java
+//Looper类
 private Looper(boolean quitAllowed) {
         mQueue = new MessageQueue(quitAllowed);
         mThread = Thread.currentThread();
