@@ -128,3 +128,5 @@ public static Message obtain() {
 从Message入列方式我们也看出，再有新消息进入队列时，是先判断新消息的触发时间，找出消息应该插入消息队列的位置，把这个位置的消息的next置为本条新消息，然后把新消息的next置为这个位置的消息的下一条消息。类似以下结构(如果我理解有错，欢迎指出)。
 
 ![message](https://raw.githubusercontent.com/leibown/Study-Notes/master/img/message.png)
+
+关于如何**MessageQueue与Looper的由来**请移步[一定搞懂Handler消息处理机制系列之「03.MessageQueue与Looper的由来」 ](https://github.com/leibown/Study-Notes/blob/master/Android/%E4%B8%80%E5%AE%9A%E6%90%9E%E6%87%82Handler%E6%B6%88%E6%81%AF%E5%A4%84%E7%90%86%E6%9C%BA%E5%88%B6%E7%B3%BB%E5%88%97/%E4%B8%80%E5%AE%9A%E6%90%9E%E6%87%82Handler%E6%B6%88%E6%81%AF%E5%A4%84%E7%90%86%E6%9C%BA%E5%88%B6%E7%B3%BB%E5%88%97%E4%B9%8B%E3%80%8C03.MessageQueue%E4%B8%8ELooper%E7%9A%84%E7%94%B1%E6%9D%A5%E3%80%8D%20.md)
