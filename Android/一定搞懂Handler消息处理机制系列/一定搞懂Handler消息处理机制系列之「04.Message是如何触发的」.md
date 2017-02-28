@@ -1,4 +1,4 @@
-# MessageQueue与Looper的由来
+# Message是如何触发的
 
 还是ActivityThread这段代码。来自[Android中为什么主线程不会因为Looper.loop()里的死循环阻塞？](http://www.jianshu.com/p/72c44d567640)
 
