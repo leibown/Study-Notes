@@ -1,3 +1,15 @@
+> ### **系列目录**:
+
+> [**一定搞懂Handler消息处理机制系列之「01.Handler消息发送」**](https://github.com/leibown/Study-Notes/blob/master/Android/%E4%B8%80%E5%AE%9A%E6%90%9E%E6%87%82Handler%E6%B6%88%E6%81%AF%E5%A4%84%E7%90%86%E6%9C%BA%E5%88%B6%E7%B3%BB%E5%88%97/%E4%B8%80%E5%AE%9A%E6%90%9E%E6%87%82Handler%E6%B6%88%E6%81%AF%E5%A4%84%E7%90%86%E6%9C%BA%E5%88%B6%E7%B3%BB%E5%88%97%E4%B9%8B%E3%80%8C01.Handler%E6%B6%88%E6%81%AF%E5%8F%91%E9%80%81%E3%80%8D.md)
+
+> [**一定搞懂Handler消息处理机制系列之「02.Message入列」**](https://github.com/leibown/Study-Notes/blob/master/Android/%E4%B8%80%E5%AE%9A%E6%90%9E%E6%87%82Handler%E6%B6%88%E6%81%AF%E5%A4%84%E7%90%86%E6%9C%BA%E5%88%B6%E7%B3%BB%E5%88%97/%E4%B8%80%E5%AE%9A%E6%90%9E%E6%87%82Handler%E6%B6%88%E6%81%AF%E5%A4%84%E7%90%86%E6%9C%BA%E5%88%B6%E7%B3%BB%E5%88%97%E4%B9%8B%E3%80%8C02.Message%E5%85%A5%E5%88%97%E3%80%8D.md)
+
+> [**一定搞懂Handler消息处理机制系列之「03.MessageQueue与Looper的由来」**](https://github.com/leibown/Study-Notes/blob/master/Android/%E4%B8%80%E5%AE%9A%E6%90%9E%E6%87%82Handler%E6%B6%88%E6%81%AF%E5%A4%84%E7%90%86%E6%9C%BA%E5%88%B6%E7%B3%BB%E5%88%97/%E4%B8%80%E5%AE%9A%E6%90%9E%E6%87%82Handler%E6%B6%88%E6%81%AF%E5%A4%84%E7%90%86%E6%9C%BA%E5%88%B6%E7%B3%BB%E5%88%97%E4%B9%8B%E3%80%8C03.MessageQueue%E4%B8%8ELooper%E7%9A%84%E7%94%B1%E6%9D%A5%E3%80%8D%20.md)
+
+> [**一定搞懂Handler消息处理机制系列之「04.Message是如何触发的」**](https://github.com/leibown/Study-Notes/blob/master/Android/%E4%B8%80%E5%AE%9A%E6%90%9E%E6%87%82Handler%E6%B6%88%E6%81%AF%E5%A4%84%E7%90%86%E6%9C%BA%E5%88%B6%E7%B3%BB%E5%88%97/%E4%B8%80%E5%AE%9A%E6%90%9E%E6%87%82Handler%E6%B6%88%E6%81%AF%E5%A4%84%E7%90%86%E6%9C%BA%E5%88%B6%E7%B3%BB%E5%88%97%E4%B9%8B%E3%80%8C04.Message%E6%98%AF%E5%A6%82%E4%BD%95%E8%A7%A6%E5%8F%91%E7%9A%84%E3%80%8D.md)
+
+
+
 # MessageQueue与Looper的由来
 
 前面两篇文章分别讲了Handler的消息发送和Message入列、Message的创建和Message在队列中的存在形式，那么MessageQueue是怎么来的？因为我们在创建Handler和发送Message时并没有创建MessageQueue，那这个消息队列从何而来呢？上源码:
@@ -14,7 +26,6 @@ public Handler(Callback callback, boolean async) {
         mCallback = callback;
         mAsynchronous = async;
     }
-
 ```
 
 以上为Handler的构造方法，Handler的构造方法共有7个，大多数构造方法都指向了这个两个参数的构造方法。从这个构造方法中，我们看到了`mQueue = mLooper.mQueue`说明消息队列MessageQueue为Looper的一个成员变量，mLooper是有Looper类中的静态方法`Looper.myLooper()`获取:
