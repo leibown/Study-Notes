@@ -3,6 +3,8 @@
 ### Java相关
 
 - [**类型信息**](https://github.com/leibown/Study-Notes/blob/master/Java/%E7%B1%BB%E5%9E%8B%E4%BF%A1%E6%81%AF.md)	
+- [**泛型**](https://github.com/leibown/Study-Notes/blob/master/Java/%E6%B3%9B%E5%9E%8B.md)
+  - [**末端哨兵（end sentinel）**](https://github.com/leibown/Study-Notes/blob/master/Java/%E6%9C%AB%E7%AB%AF%E5%93%A8%E5%85%B5%EF%BC%88end%20sentinel%EF%BC%89.md)
 
 ### Android相关
 
