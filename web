@@ -1,0 +1,578 @@
+package com.huawei.beegrid.webview;
+
+import android.annotation.TargetApi;
+import android.content.Context;
+import android.content.Intent;
+import android.graphics.Bitmap;
+import android.media.MediaMetadataRetriever;
+import android.net.Uri;
+import android.net.http.SslCertificate;
+import android.net.http.SslError;
+import android.os.Build;
+import android.os.Bundle;
+import android.support.annotation.Nullable;
+import android.text.TextUtils;
+import android.webkit.SslErrorHandler;
+import android.webkit.WebResourceError;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+
+import com.huawei.beegrid.base.config.UrlConfig;
+import com.huawei.beegrid.base.replacer.VariableReplacer;
+import com.huawei.beegrid.base.utils.FileUtils;
+import com.huawei.beegrid.common.security.AesUtil;
+import com.huawei.beegrid.webview.util.CacheFileUtil;
+import com.huawei.beegrid.webview.util.WhiteUrl;
+import com.huawei.nis.android.core.utils.NetworkUtils;
+import com.huawei.nis.android.http.HttpHelper;
+import com.huawei.nis.android.http.download.DownloadService;
+import com.huawei.nis.android.log.Log;
+
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.Charset;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import okhttp3.ResponseBody;
+import retrofit2.Call;
+import retrofit2.Response;
+
+/**
+ * 页面加载回调顺序：
+ * shouldOverrideUrlLoading
+ * onProgressChanged[10]
+ * shouldInterceptRequest
+ * onProgressChanged[...]
+ * onPageStarted
+ * onProgressChanged[...]
+ * onLoadResource
+ * onProgressChanged[...]
+ * onReceivedTitle/onPageCommitVisible
+ * onProgressChanged[100]
+ * onPageFinished
+ * onReceivedIcon
+ * 资源加载回调：
+ * shouldInterceptRequest() -> onLoadResource()
+ * 发生重定向时回调：
+ * onPageStarted() -> shouldOverrideUrlLoading()
+ * 直接loadUrl的回调：
+ * 1. 无重定向
+ * onPageStarted() -> onPageFinished()
+ * 2. 有重定向，shouldOverrideUrlLoading 返回 true 时 onPageFinished 仍会执行
+ * onPageStarted() -> redirection -> ... -> onPageFinished()
+ * 用户点击链接的回调：
+ * 1. shouldOverrideUrlLoading 返回 true 时不执行onPageStarted/onPageFinished
+ * shouldOverrideUrlLoading() -> ...
+ * 2. 无重定向
+ * shouldOverrideUrlLoading() -> onPageStarted() -> onPageFinished()
+ * 3. 有重定向
+ * shouldOverrideUrlLoading() -> onPageStarted() -> redirection -> ... -> onPageFinished()
+ * 4. 有重定向(A->B->C)
+ * shouldOverrideUrlLoading(A) -> onPageStarted(A) -> onPageStarted(B) -> shouldOverrideUrlLoading(B) -> onPageStarted(C) -> shouldOverrideUrlLoading(C) -> onPageFinished(C)
+ * 后退/前进/刷新 时回调：
+ * onPageStarted() -> onPageFinished()
+ */
+
+/**
+ * Ado抽像的WebViewClient
+ *
+ * @author 何利民(hwx600401)
+ */
+public abstract class AdoWebViewClient extends WebViewClient {
+
+    private static final String TAG = AdoWebViewClient.class.getSimpleName();
+
+    // ado webview代理
+    protected AdoWebViewProxy proxy;
+    private String mainUrl;
+
+    public AdoWebViewClient(AdoWebViewProxy proxy, String url) {
+        this.proxy = proxy;
+        String reUrl = !TextUtils.isEmpty(url) ? Uri.encode(VariableReplacer.formatOpUrl(url), "-![.:/,%?&=]#") : url;
+        this.mainUrl = !TextUtils.isEmpty(reUrl) && reUrl.contains(":443/") ? reUrl.replace(":443", "") : reUrl;
+    }
+
+    /**
+     * 通知主程序页面当前开始加载。该方法只有在加载main frame时加载一次，如果一个页面有多个frame，
+     * onPageStarted只在加载main frame时调用一次。也意味着若内置frame发生变化，onPageStarted不会被调用，
+     * 如：在iframe中打开url链接。
+     */
+    @Override
+    public void onPageStarted(WebView view, String url, Bitmap favicon) {
+        super.onPageStarted(view, url, favicon);
+    }
+
+    /**
+     * 通知主程序页面加载结束。方法只被main frame调用一次。
+     */
+    @Override
+    public void onPageFinished(WebView view, String url) {
+        super.onPageFinished(view, url);
+        String title = view.getTitle();
+        //是否为非法标题
+        if (!IllegalTitle(title)) {
+            // 设置标题
+            if (proxy.isAutoTitleBarText()) {
+                proxy.setTitleBarText(title);
+            }
+        }
+        if (proxy != null) {
+            proxy.loadPageFinish();
+        }
+    }
+
+    /**
+     * 网页标题是否为非法：空、包含ip、包含html
+     *
+     * @param title
+     * @return
+     */
+    private boolean IllegalTitle(String title) {
+        if (TextUtils.isEmpty(title) || title.contains(".html")) {
+            return true;
+        }
+        String regEx = "((2[0-4]\\d|25[0-5]|[01]?\\d\\d?)\\.){3}(2[0-4]\\d|25[0-5]|[01]?\\d\\d?)";
+        Pattern p = Pattern.compile(regEx);
+        Matcher m = p.matcher(title);
+        while (m.find()) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 这个函数会在加载超链接时回调过来；所以通过重写shouldOverrideUrlLoading，可以实现对网页中超链接的拦截；
+     * 返回值是boolean类型，表示是否屏蔽WebView继续加载URL的默认行为，因为这个函数是WebView加载URL前回调的，
+     * 所以如果我们return true，则WebView接下来就不会再加载这个URL了，所有处理都需要在WebView中操作，包含加载。
+     * 如果我们return false，则系统就认为上层没有做处理，接下来还是会继续加载这个URL的。WebViewClient默认就是return false的：
+     */
+    @Override
+    public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+        String url = request.getUrl().toString();
+        if (!TextUtils.isEmpty(url) && url.startsWith("sms:")) {
+            // 支持发短信
+            Intent intent = new Intent(Intent.ACTION_SENDTO, Uri.parse(url));
+            view.getContext().startActivity(intent);
+            return true;
+        }
+        if (!TextUtils.isEmpty(url) && url.startsWith("tel:")) {
+            // 支持打电话
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            view.getContext().startActivity(intent);
+            return true;
+        }
+
+        if (!TextUtils.isEmpty(url) && !url.startsWith("http://") && !url.startsWith("https://")) {
+            try {
+                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                view.getContext().startActivity(intent);
+            } catch (Exception e) {
+                Log.e(TAG, e.getMessage());
+            }
+            return true;
+        }
+        // 白名单校验 拦截
+        if (!WhiteUrl.checkDomain(url, view.getContext())) {
+            return true;
+        }
+        return super.shouldOverrideUrlLoading(view, request);
+    }
+
+    @Override
+    public boolean shouldOverrideUrlLoading(WebView view, String url) {
+        if (!TextUtils.isEmpty(url) && url.startsWith("sms:")) {
+            // 支持发短信
+            Intent intent = new Intent(Intent.ACTION_SENDTO, Uri.parse(url));
+            view.getContext().startActivity(intent);
+            return true;
+        }
+        if (!TextUtils.isEmpty(url) && url.startsWith("tel:")) {
+            // 支持打电话
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            view.getContext().startActivity(intent);
+            return true;
+        }
+
+        if (!TextUtils.isEmpty(url) && !url.startsWith("http://") && !url.startsWith("https://")) {
+            try {
+                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                view.getContext().startActivity(intent);
+            } catch (Exception e) {
+                Log.e(TAG, e.getMessage());
+            }
+            return true;
+        }
+        if (!WhiteUrl.checkDomain(url, view.getContext())) {
+            //域名校验通过，允许请求
+            return true;
+        }
+        return super.shouldOverrideUrlLoading(view, url);
+    }
+
+    /**
+     * 在每一次请求资源时，都会通过这个函数来回调，比如超链接、JS文件、CSS文件、图片等，
+     * 也就是说浏览器中每一次请求资源时，都会回调回来，无论任何资源！
+     * 但是必须注意的是shouldInterceptRequest函数是在非UI线程中执行的，在其中不能直接做UI操作，
+     * 如果需要做UI操作，则需要利用Handler来实现
+     * 该函数会在请求资源前调用，我们可以通过返回WebResourceResponse的处理结果来让WebView直接使用我们的处理结果。
+     * 如果我们不想处理，则直接返回null，系统会继续加载该资源。
+     * 利用这个特性，我们可以解决一个需求：假如网页中需要加载本地的图片，我们就可以通过拦截shouldInterceptRequest，并返回结果即可
+     * 比如下面的一段HTML代码中，img字段加载图片的地址是：http://localhost/qijian.png，这是我自定义的一个网址，
+     * 在Android中，当发现要加载这个地址的资源时，我们将它换成本地的图片
+     */
+    @Nullable
+    @Override
+    public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+        // 禁用favicon.ico请求
+        String url = null;
+        String fullPath = null;
+        if (request != null) {
+            Uri uri = request.getUrl();
+            if (uri != null) {
+                fullPath = uri.toString();
+                url = uri.getPath();
+            }
+        }
+        if (request != null && !request.isForMainFrame() && !TextUtils.isEmpty(url) && url.endsWith("/favicon.ico")) {
+            return null;
+        }
+        Log.d("AAA", fullPath);
+        if (!TextUtils.isEmpty(fullPath) && !WhiteUrl.checkDomain(fullPath, view.getContext())) {
+            return null;
+        }
+        if (!TextUtils.isEmpty(fullPath) && !fullPath.equals(mainUrl)) {
+            if (fullPath.contains(UrlConfig.getAPPUrl(view.getContext()))) {
+                Call<ResponseBody> requestCall;
+                try {
+                    //调整为请求头request为拦截图片的image
+                    //获取请求头为image
+                    Map<String, String> head = request.getRequestHeaders();
+                    String accept = null;
+                    if (null != head && head.containsKey("Accept")) {
+                        accept = head.get("Accept");
+                    }
+                    if ("GET".equalsIgnoreCase(request.getMethod()) && !TextUtils.isEmpty(accept) && accept.contains("image/")) {
+                        InterceptRequestService service = HttpHelper.createRetrofit(view.getContext(), InterceptRequestService.class);
+                        requestCall = service.get(fullPath);
+                        ResponseBody rb = requestCall.execute().body();
+                        InputStream is = rb.byteStream();
+                        String utf;
+                        if (rb.contentType() == null || rb.contentType().charset() == null) {
+                            utf = Charset.defaultCharset().displayName();
+                        } else {
+                            utf = rb.contentType().charset().displayName();
+                        }
+                        return new WebResourceResponse(rb.contentType().type() + "/" + rb.contentType().subtype(), utf, is);
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, e.getMessage());
+                }
+            } else if (!TextUtils.isEmpty(fullPath) && fullPath.startsWith("file://")) {
+                //本地文件
+                try {
+                    File locFile = new File(fullPath);
+                    if (null != locFile && locFile.exists()) {
+                        FileInputStream fis = new FileInputStream(locFile);
+                        return new WebResourceResponse(getMimeType(fullPath), "UTF-8", fis);
+                    }
+                } catch (FileNotFoundException e) {
+                    Log.e(TAG, e.getMessage());
+                }
+            }
+        }
+        return super.shouldInterceptRequest(view, request);
+    }
+
+    /**
+     * 获取文件getMimeType方法
+     *
+     * @param filePath
+     * @return
+     */
+    private String getMimeType(String filePath) {
+        String mime = "image/jpeg";
+        if (!TextUtils.isEmpty(filePath)) {
+            try {
+                MediaMetadataRetriever mmr = new MediaMetadataRetriever();
+                mmr.setDataSource(filePath);
+                return mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE);
+            } catch (IllegalStateException e) {
+                return mime;
+            } catch (IllegalArgumentException e) {
+                return mime;
+            } catch (RuntimeException e) {
+                return mime;
+            }
+        }
+        return mime;
+    }
+
+
+    @Nullable
+    @Override
+    public WebResourceResponse shouldInterceptRequest(WebView view, String url) {
+        // 禁用favicon.ico请求
+        if (!TextUtils.isEmpty(url) && url.toLowerCase().contains("/favicon.ico")) {
+            return null;
+        }
+        return super.shouldInterceptRequest(view, url);
+    }
+
+    /**
+     * 从本地文件获取Response
+     *
+     * @param url
+     * @param mime
+     * @return
+     */
+    private WebResourceResponse getLocResponse(Context context, String url, String mime) {
+        WebResourceResponse response = null;
+        if (!TextUtils.isEmpty(url)) {
+            FileInputStream fis = null;
+            try {
+                String filePath = CacheFileUtil.getInstance(context).getFilePath(url);
+                if (!TextUtils.isEmpty(filePath)) {
+                    File file = new File(filePath);
+                    if (file != null && !file.exists()) {
+                        return null;
+                    }
+                    fis = new FileInputStream(filePath);
+                    response = new WebResourceResponse(mime, "utf-8", fis);
+                }
+            } catch (IOException e) {
+                Log.e("webview 文件流异常");
+            }
+        }
+        return response;
+    }
+
+    /**
+     * 根据url获取本地文件路径
+     *
+     * @param context
+     * @param url
+     * @return
+     */
+    private String generateFilePath(Context context, String url) {
+        String fileType = url.substring(url.lastIndexOf(".") + 1);
+        // 使用Aes CBC价目加密后的下载地址作为文件名
+        String fileName = AesUtil.getInstance().encrypt(url) + "." + fileType;
+        // 文件存储路径
+        String filePath = FileUtils.getCacheDirStr(context, null) +
+                com.huawei.nis.android.core.file.File.separator + fileName;
+        return filePath;
+    }
+
+    private void writeResponseBodyToDisk(InputStream inputStream, String filePath) {
+        try {
+            File futureStudioIconFile = new File(filePath);
+            FileOutputStream outputStream = null;
+            try {
+                byte[] fileReader = new byte[4096];
+                outputStream = new FileOutputStream(futureStudioIconFile);
+
+                int byteRead;
+                while ((byteRead = inputStream.read(fileReader)) != -1) {
+                    outputStream.write(fileReader, 0, byteRead);
+                }
+            } catch (IOException var16) {
+                Log.e(TAG, "下载文件失败: " + filePath, var16);
+            } finally {
+                //置空输入流
+                if (inputStream != null) {
+                    inputStream.close();
+                }
+                //置空输出流
+                if (outputStream != null) {
+                    outputStream.flush();
+                    outputStream.close();
+                }
+            }
+        } catch (IOException var18) {
+
+        }
+    }
+
+    // 下载
+    private void downLoad(final Context context, final String url) {
+        try {
+            DownloadService downloadService = WebViewRetrofitManager
+                    .getInstance()
+                    .getRetrofit()
+                    .create(DownloadService.class);
+            //调用这个方法的时候已经是在子线程中，因此不需要retrofit异步请求，否则retrofit的异步请求回导致回到主线程中操作，阻塞主线程
+            Call<ResponseBody> mDownloadCall = downloadService.download(url);
+            Response<ResponseBody> response = mDownloadCall.execute();
+            if (response.isSuccessful()) {
+                String filePath = generateFilePath(context, url);
+                writeResponseBodyToDisk(response.body().byteStream(), filePath);
+                CacheFileUtil.getInstance(context).setFilePath(url, filePath);
+            }
+        } catch (Exception var9) {
+            Log.e(TAG, "downLoad.Thread=" + var9);
+        }
+    }
+
+
+    /**
+     * 在加载页面资源时会调用，每一个资源（比如图片）的加载都会调用一次
+     *
+     * @param view
+     * @param url
+     */
+    @Override
+    public void onLoadResource(WebView view, String url) {
+        super.onLoadResource(view, url);
+    }
+
+    @Override
+    public void onReceivedLoginRequest(WebView view, String realm, @Nullable String account, String args) {
+        super.onReceivedLoginRequest(view, realm, account, args);
+        // 旧版本，会在新版本中也可能被调用，所以加上一个判断，防止重复显示
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            return;
+        }
+        if (proxy != null) {
+            proxy.loadError();
+        }
+    }
+
+    /**
+     * 加载错误的时候会回调，在其中可做错误处理，比如再请求加载一次，或者提示404的错误页面
+     * 新版本，只会在Android6及以上调用
+     *
+     * @param view
+     * @param request
+     * @param error
+     */
+    @TargetApi(Build.VERSION_CODES.M)
+    @Override
+    public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+        super.onReceivedError(view, request, error);
+        Log.i(TAG, "setWebViewClient,error: " + error.getErrorCode() + " " + error.getDescription() + " - " + request.getUrl().toString());
+        //C15 lwx878765 增加条件!NetworkUtils.isAvailable(view.getContext().getApplicationContext()) ，为了在无网络的时候，显示重新加载，
+        if (request.isForMainFrame() || !NetworkUtils.isAvailable(view.getContext().getApplicationContext())) {
+            if (proxy != null) {
+                proxy.loadError();
+            }
+        }
+    }
+
+    @Override
+    public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse errorResponse) {
+        super.onReceivedHttpError(view, request, errorResponse);
+        int statusCode = errorResponse.getStatusCode();
+        Log.e(TAG, "onReceivedHttpError.request=" + request.getUrl());
+        Log.e(TAG, "onReceivedHttpError.statusCode=" + statusCode);
+        if (statusCode == 502 || statusCode == 500 || statusCode == 404) {
+//            if (request.isForMainFrame() && proxy != null)
+            if (TextUtils.equals(view.getUrl(), request.getUrl().toString()) && proxy != null) {
+                proxy.loadError();
+            }
+        }
+    }
+
+    @Override
+    public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            return;
+        }
+        if (proxy != null) {
+            proxy.loadError();
+        }
+        Log.i(TAG, "setWebViewClient,error: " + errorCode + " " + description + " - " + failingUrl);
+    }
+
+    /**
+     * 当接收到https错误时，会回调此函数，在其中可以做错误处理
+     *
+     * @param view
+     * @param handler
+     * @param error
+     */
+    @Override
+    public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
+        handler.proceed();
+        SslCertificate sslCertificate = error.getCertificate();
+        boolean isCertCorrect = verifyCertificate(view.getContext(), sslCertificate);
+        if (!isCertCorrect) {
+            handler.cancel();
+        }
+    }
+
+    /**
+     * 对证书进行判断
+     *
+     * @param context
+     * @param sslCertificate
+     * @return
+     */
+    private boolean verifyCertificate(Context context, SslCertificate sslCertificate) {
+        Certificate serverCert = getX509CertificateBg(sslCertificate);
+        Certificate localCert = getLocalCertificate(context);
+        if (serverCert == null || localCert == null) {
+            return false;
+        }
+        // 判断两个证书是否是一样
+        return serverCert.getPublicKey().equals(localCert.getPublicKey()) &&
+                serverCert.getType().equals(localCert.getType());
+    }
+
+    /**
+     * 本地证书对象
+     */
+    private static Certificate mLocalCertificate;
+
+    /**
+     * @param certificate SSL证书
+     * @return Certificate 证书
+     */
+    private Certificate getX509CertificateBg(SslCertificate certificate) {
+        Bundle saveState = SslCertificate.saveState(certificate);
+        byte[] bytes = saveState.getByteArray("x509-certificate");
+        if (bytes == null) {
+            return null;
+        } else {
+            try {
+                CertificateFactory certificateFactory = CertificateFactory.getInstance("X.509");
+                return certificateFactory.generateCertificate(new ByteArrayInputStream(bytes));
+            } catch (CertificateException ex) {
+                return null;
+            }
+        }
+    }
+
+    /**
+     * 获取本地证书
+     *
+     * @param context 上下文对象
+     * @return Certificate
+     */
+    private Certificate getLocalCertificate(Context context) {
+        if (mLocalCertificate == null) {
+            try {
+                CertificateFactory cf = CertificateFactory.getInstance("X.509");
+                InputStream caInput = context.getAssets().open("cert/server.cer");
+                mLocalCertificate = cf.generateCertificate(caInput);
+                caInput.close();
+            } catch (CertificateException | IOException e) {
+                Log.e("LocalCertificate is error ");
+
+            }
+        }
+        return mLocalCertificate;
+    }
+
+}
